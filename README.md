@@ -1,36 +1,19 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Mini Channel Talk
 
-## Getting Started
+   채널톡 FDE 채용 과제.
+   "익명의 방문자가 위젯에서 말을 걸기 시작한 순간부터, 그 사람의 정체성·맥락·과거 대화가 운영자 화면 한 곳에 모이는 경험."
 
-First, run the development server:
+   ## 빠르게 보기
+   - **라이브 URL:** [Vercel URL]
+   - **의사결정 문서:** [`deliverables/DECISION.md`](./deliverables/DECISION.md)
+   - **KPI 시트:** [`deliverables/KPI_SHEET.md`](./deliverables/KPI_SHEET.md)
+   - **아키텍처 메모:** [`deliverables/ARCHITECTURE.md`](./deliverables/ARCHITECTURE.md)
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+   ## AI 활용
+   `CLAUDE.md` 참조. Claude Code 세션의 working agreement.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+   ## 기술
+   Next.js 14 (App Router) + TypeScript + Tailwind + Supabase.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+   ## 데모 시나리오
+   라이브 URL의 랜딩 페이지에서 7단계 가이드 따라 5분 안에 thesis 검증 가능.
