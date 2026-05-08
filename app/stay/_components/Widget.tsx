@@ -1,15 +1,22 @@
 'use client';
 
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase-browser';
 import { readAnonIdFromBrowser, writeAnonIdToBrowser } from '@/lib/anon-id';
-import type { Conversation, Customer, Message } from '@/lib/types';
+import type {
+  Conversation,
+  ConversationStatus,
+  Customer,
+  Message,
+} from '@/lib/types';
 import { WidgetIdentifyForm } from './WidgetIdentifyForm';
 
 export function Widget() {
   const [open, setOpen] = useState(false);
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversationStatus, setConversationStatus] =
+    useState<ConversationStatus | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -54,21 +61,28 @@ export function Widget() {
     let cancelled = false;
 
     (async () => {
-      const { data, error } = await sb
-        .from('messages')
-        .select('*')
-        .eq('conversation_id', conversationId)
-        .eq('is_internal', false)
-        .order('sequence', { ascending: true });
+      const [msgsRes, convRes] = await Promise.all([
+        sb
+          .from('messages')
+          .select('*')
+          .eq('conversation_id', conversationId)
+          .eq('is_internal', false)
+          .order('sequence', { ascending: true }),
+        sb
+          .from('conversations')
+          .select('status')
+          .eq('id', conversationId)
+          .single(),
+      ]);
       if (cancelled) return;
-      if (error) {
-        console.error('widget messages fetch', error);
-        return;
-      }
-      if (data) setMessages(data as Message[]);
+      if (msgsRes.error) console.error('widget messages fetch', msgsRes.error);
+      else if (msgsRes.data) setMessages(msgsRes.data as Message[]);
+      if (convRes.error) console.error('widget conv fetch', convRes.error);
+      else if (convRes.data)
+        setConversationStatus(convRes.data.status as ConversationStatus);
     })();
 
-    const channel = sb
+    const messagesChannel = sb
       .channel(`widget:messages:${conversationId}`)
       .on(
         'postgres_changes',
@@ -88,9 +102,28 @@ export function Widget() {
       )
       .subscribe();
 
+    const convChannel = sb
+      .channel(`widget:conv:${conversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'conversations',
+          filter: `id=eq.${conversationId}`,
+        },
+        (payload) => {
+          setConversationStatus(
+            (payload.new as Conversation).status,
+          );
+        },
+      )
+      .subscribe();
+
     return () => {
       cancelled = true;
-      sb.removeChannel(channel);
+      sb.removeChannel(messagesChannel);
+      sb.removeChannel(convChannel);
     };
   }, [conversationId]);
 
@@ -98,8 +131,7 @@ export function Widget() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages.length]);
 
-  async function send(e: FormEvent) {
-    e.preventDefault();
+  async function send() {
     if (!customer || !input.trim() || sending) return;
     const text = input.trim();
     setInput('');
@@ -141,6 +173,8 @@ export function Widget() {
     if (!customer || customer.identified_at) return false;
     return messages.some((m) => m.sender_type === 'customer');
   }, [customer, messages]);
+
+  const isClosed = conversationStatus === 'closed';
 
   if (!open) {
     return (
@@ -205,13 +239,25 @@ export function Widget() {
         )}
       </div>
 
-      <form className="border-t border-gray-200 p-3" onSubmit={send}>
+      {isClosed && (
+        <div className="border-t border-gray-200 bg-amber-50 px-3 py-2 text-center text-xs text-amber-800">
+          이전 상담이 종료되었습니다. <br />추가 문의가 있으시면 새로 메시지를 보내주세요.
+        </div>
+      )}
+
+      <form
+        className="border-t border-gray-200 p-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void send();
+        }}
+      >
         <div className="flex gap-2">
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="메시지를 입력하세요"
-            className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-gray-100"
             disabled={!customer}
           />
           <button

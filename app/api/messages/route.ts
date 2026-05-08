@@ -44,6 +44,41 @@ export async function POST(req: NextRequest) {
     conversationId = (conv as Conversation).id;
   }
 
+  // Reopen policy: customer reply on a closed conversation re-opens the same
+  // thread (status -> pending, reopened_count++). Spec §3.1 reopened_count +
+  // §10.1 재오픈 시나리오 + §8.5 KPI 재오픈률 모두 같은 thread reopen 전제.
+  // Manager-initiated reopen은 미구현 — DECISION §7.2 참고.
+  const { data: convRow, error: convFetchErr } = await supabase
+    .from('conversations')
+    .select('status, reopened_count')
+    .eq('id', conversationId)
+    .single();
+  if (convFetchErr) {
+    return NextResponse.json({ error: convFetchErr.message }, { status: 500 });
+  }
+
+  if (convRow.status === 'closed') {
+    if (sender_type !== 'customer') {
+      return NextResponse.json(
+        {
+          error:
+            'cannot send to a closed conversation; customer must send first to reopen',
+        },
+        { status: 409 },
+      );
+    }
+    const { error: reopenErr } = await supabase
+      .from('conversations')
+      .update({
+        status: 'pending',
+        reopened_count: (convRow.reopened_count ?? 0) + 1,
+      })
+      .eq('id', conversationId);
+    if (reopenErr) {
+      return NextResponse.json({ error: reopenErr.message }, { status: 500 });
+    }
+  }
+
   // Sequence assignment per Spec §6.3 — two-statement read+insert. Race rare in
   // demo load; SERIALIZABLE/advisory-lock left as offline trade-off (Spec §6.3).
   const { data: maxRow, error: maxErr } = await supabase

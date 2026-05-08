@@ -2,11 +2,18 @@
 
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase-browser';
-import type { Conversation, Message } from '@/lib/types';
+import type { Conversation, ConversationStatus, Message } from '@/lib/types';
 import { ProfilePanel } from './_components/ProfilePanel';
 
 // Placeholder — replaced with seed manager UUID in Task 3.4 (auth bypass).
 const DEMO_MANAGER_ID = '00000000-0000-0000-0000-000000000001';
+
+const STATUS_LABEL: Record<ConversationStatus, string> = {
+  pending: '대기',
+  active: '응대중',
+  closed: '종료',
+};
+const STATUS_ORDER: ConversationStatus[] = ['pending', 'active', 'closed'];
 
 export default function AdminPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -141,6 +148,34 @@ export default function AdminPage() {
     [conversations, selectedId],
   );
 
+  const grouped = useMemo(() => {
+    const buckets: Record<ConversationStatus, Conversation[]> = {
+      pending: [],
+      active: [],
+      closed: [],
+    };
+    for (const c of conversations) buckets[c.status].push(c);
+    return buckets;
+  }, [conversations]);
+
+  async function changeStatus(next: ConversationStatus) {
+    if (!selectedConversation) return;
+    const res = await fetch(
+      `/api/conversations/${selectedConversation.id}/status`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: next,
+          assignee_id: next === 'active' ? DEMO_MANAGER_ID : undefined,
+        }),
+      },
+    );
+    if (!res.ok) console.error('status change failed', await res.text());
+  }
+
+  const isClosed = selectedConversation?.status === 'closed';
+
   return (
     <main className="grid h-screen grid-cols-[280px_1fr_300px] bg-gray-50 text-gray-900">
       <aside className="flex flex-col overflow-hidden border-r border-gray-200 bg-white">
@@ -148,41 +183,80 @@ export default function AdminPage() {
           <h2 className="text-sm font-semibold text-gray-900">대화</h2>
           <p className="text-xs text-gray-500">{conversations.length}건</p>
         </div>
-        <ul className="flex-1 overflow-y-auto px-2 py-2">
+        <div className="flex-1 overflow-y-auto px-2 py-2">
           {conversations.length === 0 && (
-            <li className="px-3 py-2 text-xs text-gray-400">아직 대화 없음</li>
+            <div className="px-3 py-2 text-xs text-gray-400">아직 대화 없음</div>
           )}
-          {conversations.map((c) => (
-            <li key={c.id}>
-              <button
-                type="button"
-                onClick={() => setSelectedId(c.id)}
-                className={`mb-1 block w-full rounded-md px-3 py-2 text-left text-sm transition ${
-                  selectedId === c.id
-                    ? 'bg-blue-50 text-blue-900'
-                    : 'text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                <div className="font-mono text-xs text-gray-500">
-                  {c.id.slice(0, 8)}
-                </div>
-                <div className="text-xs">
-                  <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] uppercase text-gray-600">
-                    {c.status}
+          {STATUS_ORDER.map((statusKey) => {
+            const items = grouped[statusKey];
+            return (
+              <section key={statusKey} className="mb-3">
+                <div className="flex items-center justify-between px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                  <span>{STATUS_LABEL[statusKey]}</span>
+                  <span className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-600">
+                    {items.length}
                   </span>
                 </div>
-              </button>
-            </li>
-          ))}
-        </ul>
+                {items.length === 0 ? (
+                  <div className="px-3 py-1 text-[11px] text-gray-300">없음</div>
+                ) : (
+                  <ul className="space-y-0.5">
+                    {items.map((c) => (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedId(c.id)}
+                          className={`block w-full rounded-md px-3 py-2 text-left text-sm transition ${
+                            selectedId === c.id
+                              ? 'bg-blue-50 text-blue-900'
+                              : 'text-gray-700 hover:bg-gray-50'
+                          }`}
+                        >
+                          <div className="font-mono text-xs text-gray-500">
+                            {c.id.slice(0, 8)}
+                          </div>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            );
+          })}
+        </div>
       </aside>
 
       <section className="flex flex-col overflow-hidden">
-        {selectedId ? (
+        {selectedId && selectedConversation ? (
           <>
-            <header className="border-b border-gray-200 bg-white px-4 py-3">
-              <div className="font-mono text-xs text-gray-500">
-                {selectedId.slice(0, 8)}
+            <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3">
+              <div className="space-y-0.5">
+                <div className="font-mono text-xs text-gray-500">
+                  {selectedId.slice(0, 8)}
+                </div>
+                <div className="text-[10px] uppercase tracking-wider text-gray-400">
+                  {STATUS_LABEL[selectedConversation.status]}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                {selectedConversation.status === 'pending' && (
+                  <button
+                    type="button"
+                    onClick={() => changeStatus('active')}
+                    className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-700"
+                  >
+                    응대 시작
+                  </button>
+                )}
+                {selectedConversation.status === 'active' && (
+                  <button
+                    type="button"
+                    onClick={() => changeStatus('closed')}
+                    className="rounded bg-gray-700 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-gray-800"
+                  >
+                    응대 종료
+                  </button>
+                )}
               </div>
             </header>
             <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3">
@@ -222,12 +296,13 @@ export default function AdminPage() {
                 <input
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="응답을 입력하세요"
-                  className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                  placeholder={isClosed ? '대화가 종료되었습니다' : '응답을 입력하세요'}
+                  disabled={isClosed}
+                  className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-gray-100"
                 />
                 <button
                   type="submit"
-                  disabled={!input.trim() || sending}
+                  disabled={!input.trim() || sending || isClosed}
                   className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-50"
                 >
                   전송

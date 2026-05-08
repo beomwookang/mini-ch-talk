@@ -66,12 +66,14 @@ export async function POST(req: NextRequest) {
         customer = existing as Customer;
       }
 
+      // Latest 1 conversation regardless of status — closed thread is still
+      // resumable (customer reply auto-reopens; see /api/messages reopen logic).
       const { data: convs, error: convErr } = await supabase
         .from('conversations')
         .select('*')
         .eq('customer_id', existing.id)
-        .neq('status', 'closed')
-        .order('opened_at', { ascending: false });
+        .order('opened_at', { ascending: false })
+        .limit(1);
       if (convErr) {
         return NextResponse.json({ error: convErr.message }, { status: 500 });
       }
