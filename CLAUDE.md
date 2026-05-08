@@ -70,6 +70,7 @@ When the user says "Task X.Y 진행해" (or equivalent), follow this loop:
 5. **When verify is green (auto + user-confirmed where applicable), commit and push.** Each commit includes:
    - The code changes for the task
    - Context updates (DOCS/ACTION_PLAN.md progress checkmarks, DOCS/DECISION.md §7.2 online trade-off log entries when a real trade-off was made, CLAUDE.md instruction updates if rules changed)
+   - **DOCS/DEV_LOG.md entry — 5 lines max, narrative of `1차 구현 → 발견 → 가설/진단 → 수정 → 결과`. DECISION.md captures *what* and *why*; DEV_LOG captures *how we got there* (interview anchor).**
    - A scoped message (e.g., `feat(lib): Task 1.1 — Supabase clients, types, anon-id`)
    Stage code + context together so each commit is a self-contained "task complete + docs current" checkpoint. After every commit, run `git push` to keep `origin/main` in sync (Vercel auto-deploys from main).
 6. **Brief end-of-task note:** what changed, any deviations from Spec, any ambiguous decisions made, and any user-side verifications still pending.
