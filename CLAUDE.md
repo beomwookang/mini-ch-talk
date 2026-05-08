@@ -67,11 +67,11 @@ When the user says "Task X.Y 진행해" (or equivalent), follow this loop:
    - Auto-verify: `pnpm tsc --noEmit`, `pnpm build`, `pnpm lint`, file existence, source inspection against Spec, SQL through the Supabase client when relevant.
    - Hand off to the user: anything requiring a real browser (DevTools cookies/localStorage, visual UI checks, Realtime cross-tab behavior, multi-incognito flows, Supabase Studio inspection if I lack access). List those checks explicitly with the exact steps the user should run, and wait for confirmation.
 4. **If auto-verify fails, fix and re-verify.** Don't claim done until it's green.
-5. **When verify is green (auto + user-confirmed where applicable), commit.** Each commit includes:
+5. **When verify is green (auto + user-confirmed where applicable), commit and push.** Each commit includes:
    - The code changes for the task
    - Context updates (DOCS/ACTION_PLAN.md progress checkmarks, DOCS/DECISION.md §7.2 online trade-off log entries when a real trade-off was made, CLAUDE.md instruction updates if rules changed)
    - A scoped message (e.g., `feat(lib): Task 1.1 — Supabase clients, types, anon-id`)
-   Stage code + context together so each commit is a self-contained "task complete + docs current" checkpoint.
+   Stage code + context together so each commit is a self-contained "task complete + docs current" checkpoint. After every commit, run `git push` to keep `origin/main` in sync (Vercel auto-deploys from main).
 6. **Brief end-of-task note:** what changed, any deviations from Spec, any ambiguous decisions made, and any user-side verifications still pending.
 
 When stuck or uncertain: ask before guessing. Surface trade-offs explicitly so they land in `DOCS/DECISION.md` §7.2.

@@ -1,18 +1,23 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { createSupabaseBrowserClient } from '@/lib/supabase-browser';
 import { readAnonIdFromBrowser, writeAnonIdToBrowser } from '@/lib/anon-id';
-import type { Conversation, Customer } from '@/lib/types';
+import type { Conversation, Customer, Message } from '@/lib/types';
 
 export function Widget() {
   const [open, setOpen] = useState(false);
   const [customer, setCustomer] = useState<Customer | null>(null);
-  const [, setConversations] = useState<Conversation[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const supabaseRef = useRef(createSupabaseBrowserClient());
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const existing = readAnonIdFromBrowser();
     let cancelled = false;
+    const existing = readAnonIdFromBrowser();
 
     fetch('/api/visitors/init', {
       method: 'POST',
@@ -28,8 +33,10 @@ export function Widget() {
       .then((data: { customer: Customer; conversations: Conversation[] }) => {
         if (cancelled || !data?.customer) return;
         setCustomer(data.customer);
-        setConversations(data.conversations ?? []);
         writeAnonIdToBrowser(data.customer.anonymous_id);
+        if (data.conversations?.length) {
+          setConversationId(data.conversations[0].id);
+        }
       })
       .catch((err) => {
         console.error('visitors/init failed', err);
@@ -39,6 +46,95 @@ export function Widget() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    const sb = supabaseRef.current;
+    let cancelled = false;
+
+    (async () => {
+      const { data, error } = await sb
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .eq('is_internal', false)
+        .order('sequence', { ascending: true });
+      if (cancelled) return;
+      if (error) {
+        console.error('widget messages fetch', error);
+        return;
+      }
+      if (data) setMessages(data as Message[]);
+    })();
+
+    const channel = sb
+      .channel(`widget:messages:${conversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const m = payload.new as Message;
+          if (m.is_internal) return;
+          setMessages((prev) =>
+            prev.some((p) => p.id === m.id) ? prev : [...prev, m],
+          );
+        },
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      sb.removeChannel(channel);
+    };
+  }, [conversationId]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [messages.length]);
+
+  async function send(e: FormEvent) {
+    e.preventDefault();
+    if (!customer || !input.trim() || sending) return;
+    const text = input.trim();
+    setInput('');
+    setSending(true);
+
+    try {
+      const res = await fetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          customer_id: customer.id,
+          sender_type: 'customer',
+          sender_id: customer.id,
+          body: text,
+        }),
+      });
+      if (!res.ok) {
+        console.error('send failed', await res.text());
+        setInput(text);
+        return;
+      }
+      const data = (await res.json()) as {
+        message: Message;
+        conversation_id: string;
+      };
+      if (!conversationId) {
+        setConversationId(data.conversation_id);
+      }
+      setMessages((prev) =>
+        prev.some((p) => p.id === data.message.id) ? prev : [...prev, data.message],
+      );
+    } finally {
+      setSending(false);
+    }
+  }
 
   if (!open) {
     return (
@@ -70,32 +166,46 @@ export function Widget() {
         </button>
       </header>
 
-      <div className="flex-1 overflow-y-auto bg-gray-50 px-4 py-3 text-sm">
-        <div className="text-gray-500">
-          {customer ? '안녕하세요! 무엇을 도와드릴까요?' : '준비 중…'}
-        </div>
+      <div ref={scrollRef} className="flex-1 overflow-y-auto bg-gray-50 px-4 py-3 text-sm">
+        {messages.length === 0 ? (
+          <div className="text-gray-500">
+            {customer ? '안녕하세요! 무엇을 도와드릴까요?' : '준비 중…'}
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {messages.map((m) => (
+              <li
+                key={m.id}
+                className={`flex ${m.sender_type === 'customer' ? 'justify-end' : 'justify-start'}`}
+              >
+                <div
+                  className={`max-w-[80%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm ${
+                    m.sender_type === 'customer'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-gray-900 border border-gray-200'
+                  }`}
+                >
+                  {m.body}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
-      <form
-        className="border-t border-gray-200 p-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          // Task 1.3에서 실제 전송 구현
-          console.log('TODO Task 1.3: send', input);
-          setInput('');
-        }}
-      >
+      <form className="border-t border-gray-200 p-3" onSubmit={send}>
         <div className="flex gap-2">
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="메시지를 입력하세요"
             className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            disabled={!customer}
           />
           <button
             type="submit"
             className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-50"
-            disabled={!input.trim()}
+            disabled={!input.trim() || !customer || sending}
           >
             전송
           </button>
