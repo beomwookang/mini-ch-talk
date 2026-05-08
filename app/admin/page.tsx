@@ -1,8 +1,9 @@
 'use client';
 
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase-browser';
 import type { Conversation, Message } from '@/lib/types';
+import { ProfilePanel } from './_components/ProfilePanel';
 
 // Placeholder — replaced with seed manager UUID in Task 3.4 (auth bypass).
 const DEMO_MANAGER_ID = '00000000-0000-0000-0000-000000000001';
@@ -135,8 +136,13 @@ export default function AdminPage() {
     }
   }
 
+  const selectedConversation = useMemo(
+    () => conversations.find((c) => c.id === selectedId) ?? null,
+    [conversations, selectedId],
+  );
+
   return (
-    <main className="grid h-screen grid-cols-[280px_1fr] bg-gray-50 text-gray-900">
+    <main className="grid h-screen grid-cols-[280px_1fr_300px] bg-gray-50 text-gray-900">
       <aside className="flex flex-col overflow-hidden border-r border-gray-200 bg-white">
         <div className="border-b border-gray-200 px-4 py-3">
           <h2 className="text-sm font-semibold text-gray-900">대화</h2>
@@ -235,6 +241,10 @@ export default function AdminPage() {
           </div>
         )}
       </section>
+
+      <aside className="overflow-hidden border-l border-gray-200 bg-white">
+        <ProfilePanel conversation={selectedConversation} />
+      </aside>
     </main>
   );
 }

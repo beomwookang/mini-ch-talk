@@ -1,9 +1,10 @@
 'use client';
 
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase-browser';
 import { readAnonIdFromBrowser, writeAnonIdToBrowser } from '@/lib/anon-id';
 import type { Conversation, Customer, Message } from '@/lib/types';
+import { WidgetIdentifyForm } from './WidgetIdentifyForm';
 
 export function Widget() {
   const [open, setOpen] = useState(false);
@@ -136,6 +137,11 @@ export function Widget() {
     }
   }
 
+  const showIdentifyForm = useMemo(() => {
+    if (!customer || customer.identified_at) return false;
+    return messages.some((m) => m.sender_type === 'customer');
+  }, [customer, messages]);
+
   if (!open) {
     return (
       <button
@@ -190,6 +196,12 @@ export function Widget() {
               </li>
             ))}
           </ul>
+        )}
+        {showIdentifyForm && customer && (
+          <WidgetIdentifyForm
+            customerId={customer.id}
+            onIdentified={(c) => setCustomer(c)}
+          />
         )}
       </div>
 
