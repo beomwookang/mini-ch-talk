@@ -63,7 +63,11 @@ When given a task:
 1. Read the referenced Spec section first
 2. Implement minimally — don't add features not asked for
 3. After implementation, briefly note: what was changed, any deviations from Spec, anything ambiguous that needed assumption
-4. Don't auto-commit; let the user review and commit
+4. **Commit after every task.** Each task ends with a commit that includes:
+   - The code changes for the task
+   - Any context updates (e.g., DOCS/ACTION_PLAN.md progress checkmarks, DOCS/DECISION.md trade-off log entries, CLAUDE.md instruction updates) made during or as a result of the task
+   - A commit message scoped to that task (e.g., `feat(lib): Task 1.1 — Supabase clients, types, anon-id`)
+   Stage code + context updates together so each commit is a self-contained checkpoint of "task complete + docs current."
 
 When stuck or uncertain:
 - Ask before guessing
