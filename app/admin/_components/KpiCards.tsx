@@ -35,7 +35,7 @@ const CARDS: CardConfig[] = [
   {
     key: 'recognition_rate',
     label: '재인식률',
-    thesis: true,
+    thesis: false,
     format: (v) => pct(v as number | null),
     tooltip:
       '전체 customer 중 visit_count > 1인 비율. 재방문한 고객의 비율. (익명 방문자 중 재방문한 비율)',
@@ -43,7 +43,7 @@ const CARDS: CardConfig[] = [
   {
     key: 'profile_filled_rate',
     label: '프로필 채워짐',
-    thesis: true,
+    thesis: false,
     format: (v) => pct(v as number | null),
     tooltip:
       '전체 customer 중 identified_at이 채워진 비율. 익명에서 식별로 넘어간 비율.',
@@ -74,7 +74,7 @@ const CARDS: CardConfig[] = [
   {
     key: 'deflection_rate',
     label: '셀프 해결률',
-    thesis: true,
+    thesis: false,
     format: (v) => pct(v as number | null),
     tooltip:
       '워크플로우 명시 결정(자기 해결 또는 상담원 연결) 이벤트 중 "도움이 됐어요"를 누른 비율. 같은 customer의 여러 시도도 각 별개 이벤트로 카운트. 채널 운영 효율의 핵심 지표.',
