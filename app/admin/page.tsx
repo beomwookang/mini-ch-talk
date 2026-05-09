@@ -2,7 +2,13 @@
 
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase-browser';
-import type { Conversation, ConversationStatus, Message } from '@/lib/types';
+import { messageTime } from '@/lib/relative-time';
+import type {
+  Conversation,
+  ConversationStatus,
+  LocalMessage,
+  Message,
+} from '@/lib/types';
 import { ProfilePanel } from './_components/ProfilePanel';
 
 // Placeholder — replaced with seed manager UUID in Task 3.4 (auth bypass).
@@ -19,7 +25,7 @@ const STATUS_ORDER: ConversationStatus[] = ['pending', 'active', 'closed'];
 export default function AdminPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const supabaseRef = useRef(createSupabaseBrowserClient());
@@ -124,7 +130,7 @@ export default function AdminPage() {
         console.error('admin messages fetch', error);
         return;
       }
-      if (data) setMessages(data as Message[]);
+      if (data) setMessages(data as LocalMessage[]);
     })();
 
     fetch('/api/messages/read', {
@@ -148,9 +154,10 @@ export default function AdminPage() {
         },
         (payload) => {
           const m = payload.new as Message;
-          setMessages((prev) =>
-            prev.some((p) => p.id === m.id) ? prev : [...prev, m],
-          );
+          setMessages((prev) => {
+            if (prev.some((p) => p.id === m.id)) return prev;
+            return [...prev, m as LocalMessage];
+          });
           // Mark incoming customer messages as read while pane is open.
           if (m.sender_type === 'customer') {
             fetch('/api/messages/read', {
@@ -174,7 +181,9 @@ export default function AdminPage() {
         },
         (payload) => {
           const m = payload.new as Message;
-          setMessages((prev) => prev.map((p) => (p.id === m.id ? m : p)));
+          setMessages((prev) =>
+            prev.map((p) => (p.id === m.id ? { ...p, ...m } : p)),
+          );
         },
       )
       .subscribe();
@@ -196,6 +205,22 @@ export default function AdminPage() {
     setInput('');
     setSending(true);
 
+    const tempId = `tmp_${crypto.randomUUID()}`;
+    const optimistic: LocalMessage = {
+      id: tempId,
+      tempId,
+      localStatus: 'sending',
+      conversation_id: selectedId,
+      sender_type: 'manager',
+      sender_id: DEMO_MANAGER_ID,
+      body: text,
+      is_internal: false,
+      sequence: -1,
+      read_at: null,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, optimistic]);
+
     try {
       const res = await fetch('/api/messages', {
         method: 'POST',
@@ -209,8 +234,29 @@ export default function AdminPage() {
       });
       if (!res.ok) {
         console.error('admin send failed', await res.text());
-        setInput(text);
+        setMessages((prev) =>
+          prev.map((p) =>
+            p.tempId === tempId ? { ...p, localStatus: 'failed' } : p,
+          ),
+        );
+        return;
       }
+      const data = (await res.json()) as { message: Message };
+      setMessages((prev) => {
+        const withoutTemp = prev.filter((p) => p.tempId !== tempId);
+        if (withoutTemp.some((p) => p.id === data.message.id)) return withoutTemp;
+        return [
+          ...withoutTemp,
+          { ...(data.message as LocalMessage), localStatus: 'sent' },
+        ];
+      });
+    } catch (err) {
+      console.error('admin send error', err);
+      setMessages((prev) =>
+        prev.map((p) =>
+          p.tempId === tempId ? { ...p, localStatus: 'failed' } : p,
+        ),
+      );
     } finally {
       setSending(false);
     }
@@ -337,27 +383,43 @@ export default function AdminPage() {
                 <div className="text-xs text-gray-400">메시지 없음</div>
               ) : (
                 <ul className="space-y-2">
-                  {messages.map((m) => (
-                    <li
-                      key={m.id}
-                      className={`flex ${m.sender_type === 'manager' ? 'justify-end' : 'justify-start'}`}
-                    >
-                      <div
-                        className={`max-w-[60%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm ${
-                          m.sender_type === 'manager'
-                            ? 'bg-blue-600 text-white'
-                            : m.sender_type === 'customer'
-                              ? 'border border-gray-200 bg-white text-gray-900'
-                              : 'bg-gray-200 text-gray-700'
-                        }`}
+                  {messages.map((m) => {
+                    const isManager = m.sender_type === 'manager';
+                    const sending = m.localStatus === 'sending';
+                    const failed = m.localStatus === 'failed';
+                    return (
+                      <li
+                        key={m.tempId ?? m.id}
+                        className={`flex flex-col ${isManager ? 'items-end' : 'items-start'}`}
                       >
-                        <div className="mb-0.5 text-[10px] opacity-70">
-                          {m.sender_type}
+                        <div
+                          className={`max-w-[60%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm transition-opacity ${
+                            isManager
+                              ? failed
+                                ? 'bg-red-100 text-red-800 border border-red-200'
+                                : sending
+                                  ? 'bg-blue-300 text-white'
+                                  : 'bg-blue-600 text-white'
+                              : m.sender_type === 'customer'
+                                ? 'border border-gray-200 bg-white text-gray-900'
+                                : 'bg-gray-200 text-gray-700'
+                          }`}
+                        >
+                          <div className="mb-0.5 text-[10px] opacity-70">
+                            {m.sender_type}
+                          </div>
+                          {m.body}
                         </div>
-                        {m.body}
-                      </div>
-                    </li>
-                  ))}
+                        <div className="mt-0.5 text-[10px] text-gray-400">
+                          {failed
+                            ? '전송 실패'
+                            : sending
+                              ? '전송 중…'
+                              : messageTime(m.created_at)}
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

@@ -53,6 +53,15 @@ export interface Message {
   created_at: string;
 }
 
+export type LocalMessageStatus = 'sending' | 'sent' | 'failed';
+
+// UI-only wrapper used for optimistic rendering. Server messages keep
+// `tempId` undefined; local-only sending messages have `tempId` set.
+export interface LocalMessage extends Message {
+  tempId?: string;
+  localStatus?: LocalMessageStatus;
+}
+
 export interface FaqEntry {
   id: string;
   question: string;

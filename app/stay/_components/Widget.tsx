@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase-browser';
 import { readAnonIdFromBrowser, writeAnonIdToBrowser } from '@/lib/anon-id';
-import { relativeTime } from '@/lib/relative-time';
+import { messageTime, relativeTime } from '@/lib/relative-time';
 import type {
   Conversation,
   ConversationStatus,
   Customer,
+  LocalMessage,
   Manager,
   Message,
 } from '@/lib/types';
@@ -19,7 +20,7 @@ export function Widget() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversationStatus, setConversationStatus] =
     useState<ConversationStatus | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [manager, setManager] = useState<Manager | null>(null);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -79,7 +80,7 @@ export function Widget() {
       ]);
       if (cancelled) return;
       if (msgsRes.error) console.error('widget messages fetch', msgsRes.error);
-      else if (msgsRes.data) setMessages(msgsRes.data as Message[]);
+      else if (msgsRes.data) setMessages(msgsRes.data as LocalMessage[]);
       if (convRes.error) console.error('widget conv fetch', convRes.error);
       else if (convRes.data)
         setConversationStatus(convRes.data.status as ConversationStatus);
@@ -98,9 +99,10 @@ export function Widget() {
         (payload) => {
           const m = payload.new as Message;
           if (m.is_internal) return;
-          setMessages((prev) =>
-            prev.some((p) => p.id === m.id) ? prev : [...prev, m],
-          );
+          setMessages((prev) => {
+            if (prev.some((p) => p.id === m.id)) return prev;
+            return [...prev, m as LocalMessage];
+          });
         },
       )
       .on(
@@ -113,7 +115,9 @@ export function Widget() {
         },
         (payload) => {
           const m = payload.new as Message;
-          setMessages((prev) => prev.map((p) => (p.id === m.id ? m : p)));
+          setMessages((prev) =>
+            prev.map((p) => (p.id === m.id ? { ...p, ...m } : p)),
+          );
         },
       )
       .subscribe();
@@ -203,6 +207,22 @@ export function Widget() {
     setInput('');
     setSending(true);
 
+    const tempId = `tmp_${crypto.randomUUID()}`;
+    const optimistic: LocalMessage = {
+      id: tempId,
+      tempId,
+      localStatus: 'sending',
+      conversation_id: conversationId ?? '',
+      sender_type: 'customer',
+      sender_id: customer.id,
+      body: text,
+      is_internal: false,
+      sequence: -1,
+      read_at: null,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, optimistic]);
+
     try {
       const res = await fetch('/api/messages', {
         method: 'POST',
@@ -217,18 +237,31 @@ export function Widget() {
       });
       if (!res.ok) {
         console.error('send failed', await res.text());
-        setInput(text);
+        setMessages((prev) =>
+          prev.map((p) =>
+            p.tempId === tempId ? { ...p, localStatus: 'failed' } : p,
+          ),
+        );
         return;
       }
       const data = (await res.json()) as {
         message: Message;
         conversation_id: string;
       };
-      if (!conversationId) {
-        setConversationId(data.conversation_id);
-      }
+      if (!conversationId) setConversationId(data.conversation_id);
+      // Replace optimistic placeholder with the server-confirmed row
+      // (also dedupes against any Realtime echo arriving for the same id).
+      setMessages((prev) => {
+        const withoutTemp = prev.filter((p) => p.tempId !== tempId);
+        if (withoutTemp.some((p) => p.id === data.message.id)) return withoutTemp;
+        return [...withoutTemp, { ...(data.message as LocalMessage), localStatus: 'sent' }];
+      });
+    } catch (err) {
+      console.error('send error', err);
       setMessages((prev) =>
-        prev.some((p) => p.id === data.message.id) ? prev : [...prev, data.message],
+        prev.map((p) =>
+          p.tempId === tempId ? { ...p, localStatus: 'failed' } : p,
+        ),
       );
     } finally {
       setSending(false);
@@ -291,25 +324,43 @@ export function Widget() {
           </div>
         ) : (
           <ul className="space-y-2">
-            {messages.map((m) => (
-              <li
-                key={m.id}
-                className={`flex flex-col ${m.sender_type === 'customer' ? 'items-end' : 'items-start'}`}
-              >
-                <div
-                  className={`max-w-[80%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm ${
-                    m.sender_type === 'customer'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-white text-gray-900 border border-gray-200'
-                  }`}
+            {messages.map((m) => {
+              const isCustomer = m.sender_type === 'customer';
+              const sending = m.localStatus === 'sending';
+              const failed = m.localStatus === 'failed';
+              return (
+                <li
+                  key={m.tempId ?? m.id}
+                  className={`flex flex-col ${isCustomer ? 'items-end' : 'items-start'}`}
                 >
-                  {m.body}
-                </div>
-                {m.sender_type === 'customer' && m.read_at && (
-                  <span className="mt-0.5 text-[10px] text-gray-400">읽음</span>
-                )}
-              </li>
-            ))}
+                  <div
+                    className={`max-w-[80%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm transition-opacity ${
+                      isCustomer
+                        ? failed
+                          ? 'bg-red-100 text-red-800 border border-red-200'
+                          : sending
+                            ? 'bg-blue-300 text-white'
+                            : 'bg-blue-600 text-white'
+                        : 'bg-white text-gray-900 border border-gray-200'
+                    }`}
+                  >
+                    {m.body}
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-gray-400">
+                    {failed ? (
+                      <span className="text-red-500">전송 실패</span>
+                    ) : sending ? (
+                      <span>전송 중…</span>
+                    ) : (
+                      <>
+                        <span>{messageTime(m.created_at)}</span>
+                        {isCustomer && m.read_at && <span>· 읽음</span>}
+                      </>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
         {showIdentifyForm && customer && (
