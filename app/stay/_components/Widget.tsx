@@ -9,6 +9,13 @@ import {
   TYPING_TIMEOUT_MS,
   type TypingChannelHandle,
 } from '@/lib/typing-indicator';
+import {
+  WORKFLOW_NODES,
+  WORKFLOW_ROOT_NODE_ID,
+  type WorkflowOption,
+} from '@/lib/workflow';
+
+type WidgetMode = 'intro' | 'workflow' | 'chat';
 import type {
   Conversation,
   ConversationStatus,
@@ -30,6 +37,12 @@ export function Widget() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [otherTyping, setOtherTyping] = useState(false);
+  const [mode, setMode] = useState<WidgetMode>('intro');
+  const [currentNodeId, setCurrentNodeId] = useState<string>(
+    WORKFLOW_ROOT_NODE_ID,
+  );
+  const [workflowPath, setWorkflowPath] = useState<WorkflowOption[]>([]);
+  const [workflowBusy, setWorkflowBusy] = useState(false);
   const supabaseRef = useRef(createSupabaseBrowserClient());
   const scrollRef = useRef<HTMLDivElement>(null);
   const typingHandleRef = useRef<TypingChannelHandle | null>(null);
@@ -56,6 +69,8 @@ export function Widget() {
         writeAnonIdToBrowser(data.customer.anonymous_id);
         if (data.conversations?.length) {
           setConversationId(data.conversations[0].id);
+          // Returning customer with an existing thread skips the workflow.
+          setMode('chat');
         }
       })
       .catch((err) => {
@@ -88,7 +103,14 @@ export function Widget() {
       ]);
       if (cancelled) return;
       if (msgsRes.error) console.error('widget messages fetch', msgsRes.error);
-      else if (msgsRes.data) setMessages(msgsRes.data as LocalMessage[]);
+      else if (msgsRes.data) {
+        // Preserve client-only workflow messages (conversation_id === '')
+        // so the user keeps seeing the workflow trail after escalation.
+        setMessages((prev) => {
+          const wf = prev.filter((m) => m.conversation_id === '');
+          return [...wf, ...(msgsRes.data as LocalMessage[])];
+        });
+      }
       if (convRes.error) console.error('widget conv fetch', convRes.error);
       else if (convRes.data)
         setConversationStatus(convRes.data.status as ConversationStatus);
@@ -299,11 +321,114 @@ export function Widget() {
   }
 
   const showIdentifyForm = useMemo(() => {
+    if (mode !== 'chat') return false;
     if (!customer || customer.identified_at) return false;
     return messages.some((m) => m.sender_type === 'customer');
-  }, [customer, messages]);
+  }, [customer, messages, mode]);
 
   const isClosed = conversationStatus === 'closed';
+
+  async function postMessage(opts: {
+    sender_type: 'customer' | 'system';
+    body: string;
+    activeConvId: string | null;
+  }): Promise<{ message: Message; conversation_id: string } | null> {
+    if (!customer) return null;
+    const res = await fetch('/api/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversation_id: opts.activeConvId,
+        customer_id: customer.id,
+        sender_type: opts.sender_type,
+        sender_id: opts.sender_type === 'customer' ? customer.id : null,
+        body: opts.body,
+      }),
+    });
+    if (!res.ok) {
+      console.error('workflow postMessage failed', await res.text());
+      return null;
+    }
+    return (await res.json()) as { message: Message; conversation_id: string };
+  }
+
+  function pushClientLocalMessage(
+    sender_type: 'customer' | 'system',
+    body: string,
+  ) {
+    setMessages((prev) => {
+      const id = `wf-${sender_type}-${prev.length}-${prev.length === 0 ? 'a' : prev[prev.length - 1]?.id ?? 'a'}`;
+      const localMsg: LocalMessage = {
+        id: `${id}-${Date.now()}`,
+        tempId: id,
+        conversation_id: '',
+        sender_type,
+        sender_id: sender_type === 'customer' ? (customer?.id ?? null) : null,
+        body,
+        is_internal: false,
+        sequence: -1,
+        read_at: null,
+        created_at: new Date().toISOString(),
+        localStatus: 'sent',
+      };
+      return [...prev, localMsg];
+    });
+  }
+
+  function startWorkflow() {
+    // intro → workflow root. root 노드 prompt를 클라이언트 system 메시지로만 노출 (DB 저장 X).
+    const rootNode = WORKFLOW_NODES[WORKFLOW_ROOT_NODE_ID];
+    if (rootNode?.prompt) pushClientLocalMessage('system', rootNode.prompt);
+    setCurrentNodeId(WORKFLOW_ROOT_NODE_ID);
+    setMode('workflow');
+  }
+
+  function chooseOption(opt: WorkflowOption) {
+    if (workflowBusy) return;
+    // 분기 흐름은 클라이언트만. DB 저장 X — escalate 시점에만 conversation 생성.
+    pushClientLocalMessage('customer', opt.label);
+    const nextNode = WORKFLOW_NODES[opt.next];
+    if (nextNode?.prompt) pushClientLocalMessage('system', nextNode.prompt);
+    setWorkflowPath((prev) => [...prev, opt]);
+    setCurrentNodeId(opt.next);
+  }
+
+  async function escalateToHuman() {
+    if (workflowBusy || !customer) return;
+    setWorkflowBusy(true);
+    try {
+      const pathSummary =
+        workflowPath.length > 0
+          ? `[사전 안내] ${workflowPath
+              .map((p) => p.label)
+              .join(' → ')} 단계까지 보고, 상담원께 이어서 문의드릴게요.`
+          : '상담원과 직접 이야기하고 싶어요.';
+
+      // 1) path summary를 customer 메시지로 → conversation 생성 (admin 컨텍스트)
+      const custRes = await postMessage({
+        sender_type: 'customer',
+        body: pathSummary,
+        activeConvId: conversationId,
+      });
+      if (!custRes) return;
+      const convId = custRes.conversation_id;
+      if (!conversationId) setConversationId(convId);
+
+      // 2) "상담원 연결됨" 안내는 customer-side UX 메시지 — admin 노이즈가 되지 않도록
+      //    DB 저장하지 않고 client-only LocalMessage로 표시.
+      pushClientLocalMessage(
+        'system',
+        '상담원과 연결되었습니다. 메시지를 보내시면 응대해드릴게요.',
+      );
+
+      setMode('chat');
+    } finally {
+      setWorkflowBusy(false);
+    }
+  }
+
+  const currentNode = WORKFLOW_NODES[currentNodeId];
+  const isWorkflowLeaf = mode === 'workflow' && !currentNode?.options;
 
   return (
     <>
@@ -361,7 +486,28 @@ export function Widget() {
       </header>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto bg-gray-50 px-4 py-3 text-sm">
-        {messages.length === 0 ? (
+        {mode === 'intro' ? (
+          <div className="animate-fade-in flex flex-col items-stretch gap-4 px-1 py-2">
+            <div className="space-y-2 rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-sm">
+              <div className="text-sm font-semibold text-gray-900">
+                Cozy Studio 상담 채널
+              </div>
+              <p className="text-xs leading-relaxed text-gray-600">
+                {WORKFLOW_NODES.intro.prompt}
+              </p>
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => startWorkflow()}
+                disabled={!customer || workflowBusy}
+                className="animate-fade-in rounded-full border border-blue-300 bg-blue-50 px-4 py-1.5 text-xs font-medium text-blue-800 shadow-sm transition hover:bg-blue-100 disabled:opacity-50"
+              >
+                문의하기
+              </button>
+            </div>
+          </div>
+        ) : messages.length === 0 ? (
           <div className="text-gray-500">
             {customer ? '안녕하세요! 무엇을 도와드릴까요?' : '준비 중…'}
           </div>
@@ -415,6 +561,48 @@ export function Widget() {
             </div>
           </div>
         )}
+        {mode === 'workflow' && currentNode && (
+          <div
+            key={`workflow-${currentNodeId}`}
+            className="mt-3 flex flex-wrap justify-end gap-1.5"
+          >
+            {!isWorkflowLeaf &&
+              currentNode.options?.map((opt, idx) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => chooseOption(opt)}
+                  disabled={workflowBusy}
+                  style={{ animationDelay: `${(idx + 1) * 100}ms` }}
+                  className="animate-fade-in rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-xs font-medium text-gray-800 shadow-sm transition hover:border-blue-300 hover:bg-blue-50 disabled:opacity-50"
+                >
+                  {opt.label}
+                </button>
+              ))}
+            {isWorkflowLeaf && (
+              <button
+                type="button"
+                onClick={() => setCurrentNodeId(WORKFLOW_ROOT_NODE_ID)}
+                disabled={workflowBusy}
+                style={{ animationDelay: '100ms' }}
+                className="animate-fade-in rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-xs font-medium text-gray-800 shadow-sm transition hover:border-blue-300 hover:bg-blue-50 disabled:opacity-50"
+              >
+                다른 문의
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void escalateToHuman()}
+              disabled={workflowBusy}
+              style={{
+                animationDelay: `${((isWorkflowLeaf ? 1 : (currentNode.options?.length ?? 0)) + 1) * 100}ms`,
+              }}
+              className="animate-fade-in rounded-full border border-blue-300 bg-blue-50 px-3.5 py-1.5 text-xs font-medium text-blue-800 shadow-sm transition hover:bg-blue-100 disabled:opacity-50"
+            >
+              상담원 직접 문의
+            </button>
+          </div>
+        )}
         {showIdentifyForm && customer && (
           <WidgetIdentifyForm
             customerId={customer.id}
@@ -443,14 +631,20 @@ export function Widget() {
               setInput(e.target.value);
               if (e.target.value) typingHandleRef.current?.notifyTyping();
             }}
-            placeholder="메시지를 입력하세요"
+            placeholder={
+              mode !== 'chat'
+                ? '버튼을 눌러주세요'
+                : isClosed
+                  ? '대화가 종료되었습니다'
+                  : '메시지를 입력하세요'
+            }
             className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-gray-100"
-            disabled={!customer}
+            disabled={!customer || mode !== 'chat'}
           />
           <button
             type="submit"
             className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-50"
-            disabled={!input.trim() || !customer || sending}
+            disabled={!input.trim() || !customer || sending || mode !== 'chat'}
           >
             전송
           </button>
