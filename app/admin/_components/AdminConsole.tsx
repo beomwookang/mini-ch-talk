@@ -4,6 +4,11 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase-browser';
 import { customerLabel } from '@/lib/customer-label';
 import { messageTime } from '@/lib/relative-time';
+import {
+  createTypingChannel,
+  TYPING_TIMEOUT_MS,
+  type TypingChannelHandle,
+} from '@/lib/typing-indicator';
 import type {
   Conversation,
   ConversationStatus,
@@ -39,6 +44,9 @@ export function AdminConsole({ managerId, managerName }: AdminConsoleProps) {
   const [internalMode, setInternalMode] = useState(false);
   const [sending, setSending] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [otherTyping, setOtherTyping] = useState(false);
+  const typingHandleRef = useRef<TypingChannelHandle | null>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const supabaseRef = useRef(createSupabaseBrowserClient());
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -207,7 +215,30 @@ export function AdminConsole({ managerId, managerName }: AdminConsoleProps) {
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages.length]);
+  }, [messages.length, otherTyping]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const sb = supabaseRef.current;
+    const handle = createTypingChannel(sb, selectedId, 'manager', () => {
+      setOtherTyping(true);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(
+        () => setOtherTyping(false),
+        TYPING_TIMEOUT_MS,
+      );
+    });
+    typingHandleRef.current = handle;
+    return () => {
+      handle.cleanup();
+      typingHandleRef.current = null;
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+      setOtherTyping(false);
+    };
+  }, [selectedId]);
 
   async function send(e: FormEvent) {
     e.preventDefault();
@@ -504,6 +535,15 @@ export function AdminConsole({ managerId, managerName }: AdminConsoleProps) {
                   })}
                 </ul>
               )}
+              {otherTyping && (
+                <div className="mt-2 flex items-start">
+                  <div className="flex items-center gap-1 rounded-2xl border border-gray-200 bg-white px-3 py-2">
+                    <span className="block h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]" />
+                    <span className="block h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]" />
+                    <span className="block h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400" />
+                  </div>
+                </div>
+              )}
             </div>
             <form
               onSubmit={send}
@@ -553,7 +593,12 @@ export function AdminConsole({ managerId, managerName }: AdminConsoleProps) {
               <div className="flex gap-2">
                 <input
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  onChange={(e) => {
+                    setInput(e.target.value);
+                    if (e.target.value && !internalMode) {
+                      typingHandleRef.current?.notifyTyping();
+                    }
+                  }}
                   placeholder={
                     isClosed
                       ? '대화가 종료되었습니다'

@@ -4,6 +4,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase-browser';
 import { readAnonIdFromBrowser, writeAnonIdToBrowser } from '@/lib/anon-id';
 import { messageTime, relativeTime } from '@/lib/relative-time';
+import {
+  createTypingChannel,
+  TYPING_TIMEOUT_MS,
+  type TypingChannelHandle,
+} from '@/lib/typing-indicator';
 import type {
   Conversation,
   ConversationStatus,
@@ -24,8 +29,11 @@ export function Widget() {
   const [manager, setManager] = useState<Manager | null>(null);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [otherTyping, setOtherTyping] = useState(false);
   const supabaseRef = useRef(createSupabaseBrowserClient());
   const scrollRef = useRef<HTMLDivElement>(null);
+  const typingHandleRef = useRef<TypingChannelHandle | null>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -182,7 +190,29 @@ export function Widget() {
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages.length]);
+  }, [messages.length, otherTyping]);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    const sb = supabaseRef.current;
+    const handle = createTypingChannel(sb, conversationId, 'customer', () => {
+      setOtherTyping(true);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(
+        () => setOtherTyping(false),
+        TYPING_TIMEOUT_MS,
+      );
+    });
+    typingHandleRef.current = handle;
+    return () => {
+      handle.cleanup();
+      typingHandleRef.current = null;
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+    };
+  }, [conversationId]);
 
   // Mark incoming manager messages as read while the widget is open.
   useEffect(() => {
@@ -376,6 +406,15 @@ export function Widget() {
             })}
           </ul>
         )}
+        {otherTyping && (
+          <div className="mt-2 flex items-start">
+            <div className="flex items-center gap-1 rounded-2xl border border-gray-200 bg-white px-3 py-2">
+              <span className="block h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]" />
+              <span className="block h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]" />
+              <span className="block h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400" />
+            </div>
+          </div>
+        )}
         {showIdentifyForm && customer && (
           <WidgetIdentifyForm
             customerId={customer.id}
@@ -400,7 +439,10 @@ export function Widget() {
         <div className="flex gap-2">
           <input
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              if (e.target.value) typingHandleRef.current?.notifyTyping();
+            }}
             placeholder="메시지를 입력하세요"
             className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-gray-100"
             disabled={!customer}
