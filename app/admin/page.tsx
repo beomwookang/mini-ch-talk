@@ -7,6 +7,7 @@ import { ProfilePanel } from './_components/ProfilePanel';
 
 // Placeholder — replaced with seed manager UUID in Task 3.4 (auth bypass).
 const DEMO_MANAGER_ID = '00000000-0000-0000-0000-000000000001';
+const HEARTBEAT_MS = 30_000;
 
 const STATUS_LABEL: Record<ConversationStatus, string> = {
   pending: '대기',
@@ -23,6 +24,45 @@ export default function AdminPage() {
   const [sending, setSending] = useState(false);
   const supabaseRef = useRef(createSupabaseBrowserClient());
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const setStatus = (status: 'online' | 'offline') =>
+      fetch(`/api/managers/${DEMO_MANAGER_ID}/presence`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+        keepalive: true,
+      }).catch(() => undefined);
+
+    const beaconOffline = () => {
+      const blob = new Blob([JSON.stringify({ status: 'offline' })], {
+        type: 'application/json',
+      });
+      navigator.sendBeacon(
+        `/api/managers/${DEMO_MANAGER_ID}/presence`,
+        blob,
+      );
+    };
+
+    setStatus('online');
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') setStatus('online');
+    }, HEARTBEAT_MS);
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') setStatus('offline');
+      else setStatus('online');
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('beforeunload', beaconOffline);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('beforeunload', beaconOffline);
+      beaconOffline();
+    };
+  }, []);
 
   useEffect(() => {
     const sb = supabaseRef.current;

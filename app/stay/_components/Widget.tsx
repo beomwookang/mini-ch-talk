@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase-browser';
 import { readAnonIdFromBrowser, writeAnonIdToBrowser } from '@/lib/anon-id';
+import { relativeTime } from '@/lib/relative-time';
 import type {
   Conversation,
   ConversationStatus,
   Customer,
+  Manager,
   Message,
 } from '@/lib/types';
 import { WidgetIdentifyForm } from './WidgetIdentifyForm';
@@ -18,6 +20,7 @@ export function Widget() {
   const [conversationStatus, setConversationStatus] =
     useState<ConversationStatus | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [manager, setManager] = useState<Manager | null>(null);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const supabaseRef = useRef(createSupabaseBrowserClient());
@@ -128,6 +131,39 @@ export function Widget() {
   }, [conversationId]);
 
   useEffect(() => {
+    const sb = supabaseRef.current;
+    let cancelled = false;
+
+    (async () => {
+      const { data, error } = await sb
+        .from('managers')
+        .select('*')
+        .order('last_seen_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error) console.error('widget manager fetch', error);
+      else if (data) setManager(data as Manager);
+    })();
+
+    const channel = sb
+      .channel('widget:managers')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'managers' },
+        (payload) => {
+          setManager(payload.new as Manager);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      sb.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages.length]);
 
@@ -194,7 +230,19 @@ export function Widget() {
       <header className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
         <div>
           <div className="text-sm font-semibold text-gray-900">호스트</div>
-          <div className="text-xs text-gray-500">운영자 응대 가능</div>
+          <div className="flex items-center gap-1.5 text-xs text-gray-500">
+            <span
+              aria-hidden
+              className={`inline-block h-1.5 w-1.5 rounded-full ${
+                manager?.online_status === 'online'
+                  ? 'bg-green-500'
+                  : 'bg-gray-300'
+              }`}
+            />
+            {manager?.online_status === 'online'
+              ? '운영자 응대 가능'
+              : `운영자 부재중${manager?.last_seen_at ? ` · ${relativeTime(manager.last_seen_at)}` : ''}`}
+          </div>
         </div>
         <button
           type="button"
