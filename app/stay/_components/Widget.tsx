@@ -15,7 +15,7 @@ import {
   type WorkflowOption,
 } from '@/lib/workflow';
 
-type WidgetMode = 'intro' | 'workflow' | 'chat';
+type WidgetMode = 'intro' | 'workflow' | 'chat' | 'resolved';
 import type {
   Conversation,
   ConversationStatus,
@@ -375,12 +375,25 @@ export function Widget() {
     });
   }
 
+  function postWorkflowEvent(
+    event_type: 'started' | 'escalated' | 'resolved',
+  ) {
+    if (!customer) return;
+    void fetch('/api/workflow/event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customer_id: customer.id, event_type }),
+      keepalive: true,
+    }).catch((err) => console.error('workflow event ping failed', err));
+  }
+
   function startWorkflow() {
     // intro → workflow root. root 노드 prompt를 클라이언트 system 메시지로만 노출 (DB 저장 X).
     const rootNode = WORKFLOW_NODES[WORKFLOW_ROOT_NODE_ID];
     if (rootNode?.prompt) pushClientLocalMessage('system', rootNode.prompt);
     setCurrentNodeId(WORKFLOW_ROOT_NODE_ID);
     setMode('workflow');
+    postWorkflowEvent('started');
   }
 
   function chooseOption(opt: WorkflowOption) {
@@ -391,6 +404,23 @@ export function Widget() {
     if (nextNode?.prompt) pushClientLocalMessage('system', nextNode.prompt);
     setWorkflowPath((prev) => [...prev, opt]);
     setCurrentNodeId(opt.next);
+  }
+
+  function markResolved() {
+    if (workflowBusy) return;
+    pushClientLocalMessage(
+      'system',
+      '문의가 종료되었습니다. 이용해주셔서 감사합니다 :)',
+    );
+    postWorkflowEvent('resolved');
+    setMode('resolved');
+  }
+
+  function restartWorkflow() {
+    setMessages([]);
+    setWorkflowPath([]);
+    setCurrentNodeId(WORKFLOW_ROOT_NODE_ID);
+    setMode('intro');
   }
 
   async function escalateToHuman() {
@@ -421,6 +451,7 @@ export function Widget() {
         '상담원과 연결되었습니다. 메시지를 보내시면 응대해드릴게요.',
       );
 
+      postWorkflowEvent('escalated');
       setMode('chat');
     } finally {
       setWorkflowBusy(false);
@@ -561,6 +592,17 @@ export function Widget() {
             </div>
           </div>
         )}
+        {mode === 'resolved' && (
+          <div className="mt-3 flex justify-end">
+            <button
+              type="button"
+              onClick={restartWorkflow}
+              className="animate-fade-in rounded-full border border-blue-300 bg-blue-50 px-3.5 py-1.5 text-xs font-medium text-blue-800 shadow-sm transition hover:bg-blue-100"
+            >
+              다시 문의하기
+            </button>
+          </div>
+        )}
         {mode === 'workflow' && currentNode && (
           <div
             key={`workflow-${currentNodeId}`}
@@ -580,15 +622,26 @@ export function Widget() {
                 </button>
               ))}
             {isWorkflowLeaf && (
-              <button
-                type="button"
-                onClick={() => setCurrentNodeId(WORKFLOW_ROOT_NODE_ID)}
-                disabled={workflowBusy}
-                style={{ animationDelay: '100ms' }}
-                className="animate-fade-in rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-xs font-medium text-gray-800 shadow-sm transition hover:border-blue-300 hover:bg-blue-50 disabled:opacity-50"
-              >
-                다른 문의
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => setCurrentNodeId(WORKFLOW_ROOT_NODE_ID)}
+                  disabled={workflowBusy}
+                  style={{ animationDelay: '100ms' }}
+                  className="animate-fade-in rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-xs font-medium text-gray-800 shadow-sm transition hover:border-blue-300 hover:bg-blue-50 disabled:opacity-50"
+                >
+                  다른 문의
+                </button>
+                <button
+                  type="button"
+                  onClick={() => markResolved()}
+                  disabled={workflowBusy}
+                  style={{ animationDelay: '200ms' }}
+                  className="animate-fade-in rounded-full border border-emerald-300 bg-emerald-50 px-3.5 py-1.5 text-xs font-medium text-emerald-800 shadow-sm transition hover:bg-emerald-100 disabled:opacity-50"
+                >
+                  도움이 됐어요
+                </button>
+              </>
             )}
             <button
               type="button"
@@ -632,11 +685,13 @@ export function Widget() {
               if (e.target.value) typingHandleRef.current?.notifyTyping();
             }}
             placeholder={
-              mode !== 'chat'
-                ? '버튼을 눌러주세요'
-                : isClosed
-                  ? '대화가 종료되었습니다'
-                  : '메시지를 입력하세요'
+              mode === 'resolved'
+                ? '문의가 종료되었습니다'
+                : mode !== 'chat'
+                  ? '버튼을 눌러주세요'
+                  : isClosed
+                    ? '대화가 종료되었습니다'
+                    : '메시지를 입력하세요'
             }
             className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-gray-100"
             disabled={!customer || mode !== 'chat'}

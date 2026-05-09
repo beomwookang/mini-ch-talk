@@ -71,6 +71,14 @@ const CARDS: CardConfig[] = [
     tooltip:
       '종료된 대화 중 reopened_count > 0인 비율. customer가 닫힌 대화를 다시 연 비율.',
   },
+  {
+    key: 'deflection_rate',
+    label: '셀프 해결률',
+    thesis: true,
+    format: (v) => pct(v as number | null),
+    tooltip:
+      '워크플로우 명시 결정(자기 해결 또는 상담원 연결) 이벤트 중 "도움이 됐어요"를 누른 비율. 같은 customer의 여러 시도도 각 별개 이벤트로 카운트. 채널 운영 효율의 핵심 지표.',
+  },
 ];
 
 export function KpiCards() {
@@ -123,7 +131,7 @@ export function KpiCards() {
   }, [openInfo]);
 
   return (
-    <div ref={wrapperRef} className="grid grid-cols-5 gap-2">
+    <div ref={wrapperRef} className="grid grid-cols-6 gap-2">
       {CARDS.map((card) => {
         const value = data ? card.format(data[card.key]) : '—';
         const isOpen = openInfo === card.key;

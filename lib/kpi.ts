@@ -6,6 +6,7 @@ export interface KpiSnapshot {
   ttfr_seconds: number | null; // 첫 customer→manager 응답 시간 median (초)
   active_conversations: number; // status='active' 카운트
   reopen_rate: number | null; // 종료 대화 중 reopened_count > 0 비율
+  deflection_rate: number | null; // workflow 시작한 customer 중 escalate 안 한 비율
 }
 
 export async function computeKpi(): Promise<KpiSnapshot> {
@@ -120,11 +121,34 @@ export async function computeKpi(): Promise<KpiSnapshot> {
     }
   }
 
+  // deflection_rate — 각 명시적 결정(resolved 또는 escalated)을 별개 이벤트로 카운트.
+  //   같은 customer가 워크플로우를 여러 번 시도해도 각 시도가 별도로 측정됨.
+  //   unsettled (started 후 결정 안 한) 시도는 모집단에서 자연 제외.
+  let deflection_rate: number | null = null;
+  const { data: workflowEvents, error: wfErr } = await supabase
+    .from('workflow_events')
+    .select('event_type');
+  if (wfErr) {
+    console.error('kpi workflow_events fetch', wfErr);
+  } else if (workflowEvents) {
+    let resolvedCount = 0;
+    let escalatedCount = 0;
+    for (const e of workflowEvents) {
+      if (e.event_type === 'resolved') resolvedCount++;
+      else if (e.event_type === 'escalated') escalatedCount++;
+    }
+    const settledTotal = resolvedCount + escalatedCount;
+    if (settledTotal > 0) {
+      deflection_rate = resolvedCount / settledTotal;
+    }
+  }
+
   return {
     recognition_rate,
     profile_filled_rate,
     ttfr_seconds,
     active_conversations,
     reopen_rate,
+    deflection_rate,
   };
 }

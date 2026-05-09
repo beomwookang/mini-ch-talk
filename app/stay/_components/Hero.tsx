@@ -31,7 +31,8 @@ export function Hero() {
               fill
               className="object-cover"
               sizes="(min-width: 640px) 33vw, 100vw"
-              priority={img.src === '/room_image_1.jpg'}
+              priority
+              loading="eager"
             />
           </div>
         ))}
