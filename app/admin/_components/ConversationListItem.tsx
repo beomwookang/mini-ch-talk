@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase-browser';
+import { customerLabel } from '@/lib/customer-label';
 import { messageTime } from '@/lib/relative-time';
 import type { Conversation, Customer, Message } from '@/lib/types';
 
@@ -11,14 +12,6 @@ interface Props {
   conversation: Conversation;
   selected: boolean;
   onSelect: () => void;
-}
-
-function customerLabel(customer: Customer | null, fallbackId: string): string {
-  if (customer?.name) return customer.name;
-  if (customer?.anonymous_id) {
-    return `익명 ${customer.anonymous_id.slice(-4)}`;
-  }
-  return fallbackId.slice(0, 8);
 }
 
 function truncate(text: string, max = PREVIEW_MAX): string {
@@ -70,7 +63,7 @@ export function ConversationListItem({
     })();
 
     const customerChannel = sb
-      .channel(`admin:list:customer:${conversation.customer_id}`)
+      .channel(`admin:list:customer:${conversation.id}`)
       .on(
         'postgres_changes',
         {

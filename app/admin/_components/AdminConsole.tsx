@@ -2,10 +2,12 @@
 
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase-browser';
+import { customerLabel } from '@/lib/customer-label';
 import { messageTime } from '@/lib/relative-time';
 import type {
   Conversation,
   ConversationStatus,
+  Customer,
   LocalMessage,
   Message,
 } from '@/lib/types';
@@ -36,6 +38,7 @@ export function AdminConsole({ managerId, managerName }: AdminConsoleProps) {
   const [input, setInput] = useState('');
   const [internalMode, setInternalMode] = useState(false);
   const [sending, setSending] = useState(false);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const supabaseRef = useRef(createSupabaseBrowserClient());
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -272,6 +275,47 @@ export function AdminConsole({ managerId, managerName }: AdminConsoleProps) {
     }
   }
 
+  useEffect(() => {
+    const conv = conversations.find((c) => c.id === selectedId);
+    if (!conv) return;
+    const sb = supabaseRef.current;
+    let cancelled = false;
+    const customerId = conv.customer_id;
+
+    (async () => {
+      const { data, error } = await sb
+        .from('customers')
+        .select('*')
+        .eq('id', customerId)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error) {
+        console.error('admin selected customer fetch', error);
+        return;
+      }
+      if (data) setSelectedCustomer(data as Customer);
+    })();
+
+    const channel = sb
+      .channel(`admin-console:customer:${conv.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'customers',
+          filter: `id=eq.${customerId}`,
+        },
+        (payload) => setSelectedCustomer(payload.new as Customer),
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      sb.removeChannel(channel);
+    };
+  }, [selectedId, conversations]);
+
   const selectedConversation = useMemo(
     () => conversations.find((c) => c.id === selectedId) ?? null,
     [conversations, selectedId],
@@ -304,6 +348,15 @@ export function AdminConsole({ managerId, managerName }: AdminConsoleProps) {
   }
 
   const isClosed = selectedConversation?.status === 'closed';
+
+  const renderSenderLabel = (m: LocalMessage): string => {
+    if (m.is_internal) return `${managerName} · 내부 메모`;
+    if (m.sender_type === 'manager') return managerName;
+    if (m.sender_type === 'customer') {
+      return customerLabel(selectedCustomer, selectedConversation?.id ?? '');
+    }
+    return '시스템';
+  };
 
   return (
     <main className="grid h-screen grid-rows-[auto_1fr] bg-gray-50 text-gray-900">
@@ -435,7 +488,7 @@ export function AdminConsole({ managerId, managerName }: AdminConsoleProps) {
                           }`}
                         >
                           <div className="mb-0.5 text-[10px] opacity-70">
-                            {internal ? '내부 메모' : m.sender_type}
+                            {renderSenderLabel(m)}
                           </div>
                           {m.body}
                         </div>
