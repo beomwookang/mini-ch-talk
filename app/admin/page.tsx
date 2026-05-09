@@ -9,6 +9,7 @@ import type {
   LocalMessage,
   Message,
 } from '@/lib/types';
+import { ConversationListItem } from './_components/ConversationListItem';
 import { ProfilePanel } from './_components/ProfilePanel';
 
 // Placeholder — replaced with seed manager UUID in Task 3.4 (auth bypass).
@@ -322,19 +323,11 @@ export default function AdminPage() {
                   <ul className="space-y-0.5">
                     {items.map((c) => (
                       <li key={c.id}>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedId(c.id)}
-                          className={`block w-full rounded-md px-3 py-2 text-left text-sm transition ${
-                            selectedId === c.id
-                              ? 'bg-blue-50 text-blue-900'
-                              : 'text-gray-700 hover:bg-gray-50'
-                          }`}
-                        >
-                          <div className="font-mono text-xs text-gray-500">
-                            {c.id.slice(0, 8)}
-                          </div>
-                        </button>
+                        <ConversationListItem
+                          conversation={c}
+                          selected={selectedId === c.id}
+                          onSelect={() => setSelectedId(c.id)}
+                        />
                       </li>
                     ))}
                   </ul>
