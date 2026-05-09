@@ -103,6 +103,19 @@ export function Widget() {
           );
         },
       )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const m = payload.new as Message;
+          setMessages((prev) => prev.map((p) => (p.id === m.id ? m : p)));
+        },
+      )
       .subscribe();
 
     const convChannel = sb
@@ -166,6 +179,23 @@ export function Widget() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages.length]);
+
+  // Mark incoming manager messages as read while the widget is open.
+  useEffect(() => {
+    if (!open || !conversationId) return;
+    const hasUnreadManager = messages.some(
+      (m) => m.sender_type === 'manager' && !m.read_at,
+    );
+    if (!hasUnreadManager) return;
+    fetch('/api/messages/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        reader: 'customer',
+      }),
+    }).catch(() => undefined);
+  }, [open, conversationId, messages]);
 
   async function send() {
     if (!customer || !input.trim() || sending) return;
@@ -264,7 +294,7 @@ export function Widget() {
             {messages.map((m) => (
               <li
                 key={m.id}
-                className={`flex ${m.sender_type === 'customer' ? 'justify-end' : 'justify-start'}`}
+                className={`flex flex-col ${m.sender_type === 'customer' ? 'items-end' : 'items-start'}`}
               >
                 <div
                   className={`max-w-[80%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm ${
@@ -275,6 +305,9 @@ export function Widget() {
                 >
                   {m.body}
                 </div>
+                {m.sender_type === 'customer' && m.read_at && (
+                  <span className="mt-0.5 text-[10px] text-gray-400">읽음</span>
+                )}
               </li>
             ))}
           </ul>

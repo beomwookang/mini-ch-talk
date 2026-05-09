@@ -127,6 +127,15 @@ export default function AdminPage() {
       if (data) setMessages(data as Message[]);
     })();
 
+    fetch('/api/messages/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversation_id: selectedId,
+        reader: 'manager',
+      }),
+    }).catch(() => undefined);
+
     const channel = sb
       .channel(`admin:messages:${selectedId}`)
       .on(
@@ -142,6 +151,30 @@ export default function AdminPage() {
           setMessages((prev) =>
             prev.some((p) => p.id === m.id) ? prev : [...prev, m],
           );
+          // Mark incoming customer messages as read while pane is open.
+          if (m.sender_type === 'customer') {
+            fetch('/api/messages/read', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                conversation_id: selectedId,
+                reader: 'manager',
+              }),
+            }).catch(() => undefined);
+          }
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${selectedId}`,
+        },
+        (payload) => {
+          const m = payload.new as Message;
+          setMessages((prev) => prev.map((p) => (p.id === m.id ? m : p)));
         },
       )
       .subscribe();
