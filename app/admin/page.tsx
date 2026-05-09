@@ -28,6 +28,7 @@ export default function AdminPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [input, setInput] = useState('');
+  const [internalMode, setInternalMode] = useState(false);
   const [sending, setSending] = useState(false);
   const supabaseRef = useRef(createSupabaseBrowserClient());
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -207,6 +208,7 @@ export default function AdminPage() {
     setSending(true);
 
     const tempId = `tmp_${crypto.randomUUID()}`;
+    const isInternal = internalMode;
     const optimistic: LocalMessage = {
       id: tempId,
       tempId,
@@ -215,7 +217,7 @@ export default function AdminPage() {
       sender_type: 'manager',
       sender_id: DEMO_MANAGER_ID,
       body: text,
-      is_internal: false,
+      is_internal: isInternal,
       sequence: -1,
       read_at: null,
       created_at: new Date().toISOString(),
@@ -231,6 +233,7 @@ export default function AdminPage() {
           sender_type: 'manager',
           sender_id: DEMO_MANAGER_ID,
           body: text,
+          is_internal: isInternal,
         }),
       });
       if (!res.ok) {
@@ -380,6 +383,7 @@ export default function AdminPage() {
                     const isManager = m.sender_type === 'manager';
                     const sending = m.localStatus === 'sending';
                     const failed = m.localStatus === 'failed';
+                    const internal = m.is_internal;
                     return (
                       <li
                         key={m.tempId ?? m.id}
@@ -387,19 +391,25 @@ export default function AdminPage() {
                       >
                         <div
                           className={`max-w-[60%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm transition-opacity ${
-                            isManager
+                            internal
                               ? failed
-                                ? 'bg-red-100 text-red-800 border border-red-200'
+                                ? 'border border-red-300 bg-red-50 text-red-800'
                                 : sending
-                                  ? 'bg-blue-300 text-white'
-                                  : 'bg-blue-600 text-white'
-                              : m.sender_type === 'customer'
-                                ? 'border border-gray-200 bg-white text-gray-900'
-                                : 'bg-gray-200 text-gray-700'
+                                  ? 'border border-amber-200 bg-amber-50 text-amber-700'
+                                  : 'border border-amber-300 bg-amber-100 text-amber-900'
+                              : isManager
+                                ? failed
+                                  ? 'bg-red-100 text-red-800 border border-red-200'
+                                  : sending
+                                    ? 'bg-blue-300 text-white'
+                                    : 'bg-blue-600 text-white'
+                                : m.sender_type === 'customer'
+                                  ? 'border border-gray-200 bg-white text-gray-900'
+                                  : 'bg-gray-200 text-gray-700'
                           }`}
                         >
                           <div className="mb-0.5 text-[10px] opacity-70">
-                            {m.sender_type}
+                            {internal ? '내부 메모' : m.sender_type}
                           </div>
                           {m.body}
                         </div>
@@ -418,20 +428,67 @@ export default function AdminPage() {
             </div>
             <form
               onSubmit={send}
-              className="border-t border-gray-200 bg-white p-3"
+              className={`border-t p-3 transition-colors ${internalMode ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-white'}`}
             >
+              <div className="mb-2 flex items-center gap-2 text-[11px]">
+                <div
+                  role="tablist"
+                  aria-label="메시지 모드"
+                  className="inline-flex rounded-full bg-gray-100 p-0.5"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={!internalMode}
+                    onClick={() => setInternalMode(false)}
+                    disabled={isClosed}
+                    className={`rounded-full px-3 py-1 font-medium transition disabled:opacity-50 ${
+                      !internalMode
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    고객 응대
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={internalMode}
+                    onClick={() => setInternalMode(true)}
+                    disabled={isClosed}
+                    className={`rounded-full px-3 py-1 font-medium transition disabled:opacity-50 ${
+                      internalMode
+                        ? 'bg-amber-200 text-amber-900 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    내부 메모
+                  </button>
+                </div>
+                {internalMode && (
+                  <span className="text-amber-700">
+                    이 메시지는 고객에게 보이지 않습니다
+                  </span>
+                )}
+              </div>
               <div className="flex gap-2">
                 <input
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder={isClosed ? '대화가 종료되었습니다' : '응답을 입력하세요'}
+                  placeholder={
+                    isClosed
+                      ? '대화가 종료되었습니다'
+                      : internalMode
+                        ? '내부 메모를 입력하세요'
+                        : '응답을 입력하세요'
+                  }
                   disabled={isClosed}
                   className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-gray-100"
                 />
                 <button
                   type="submit"
                   disabled={!input.trim() || sending || isClosed}
-                  className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-50"
+                  className={`rounded-md px-3 py-2 text-sm font-medium text-white transition disabled:opacity-50 ${internalMode ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}
                 >
                   전송
                 </button>
