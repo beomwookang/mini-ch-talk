@@ -1,16 +1,17 @@
+import { Faq } from './_components/Faq';
+import { Hero } from './_components/Hero';
 import { Widget } from './_components/Widget';
 
 export default function StayPage() {
   return (
-    <main className="min-h-screen bg-white">
-      <section className="mx-auto max-w-3xl px-6 py-16">
-        <h1 className="text-4xl font-bold tracking-tight text-gray-900">
-          마포 한강뷰 스튜디오
-        </h1>
-        <p className="mt-3 text-sm text-gray-500">
-          단기임대 데모 페이지 — 콘텐츠는 Task 3.3에서 채워집니다.
-        </p>
-      </section>
+    <main className="min-h-screen bg-gray-50">
+      <div className="mx-auto max-w-4xl space-y-16 px-6 py-12 sm:py-16">
+        <Hero />
+        <Faq />
+        <footer className="border-t border-gray-200 pt-6 text-xs text-gray-400">
+          데모 페이지 · Mini Channel Talk 과제용 가짜 단기임대 사이트
+        </footer>
+      </div>
       <Widget />
     </main>
   );
