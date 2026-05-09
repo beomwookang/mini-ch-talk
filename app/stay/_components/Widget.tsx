@@ -275,33 +275,46 @@ export function Widget() {
 
   const isClosed = conversationStatus === 'closed';
 
-  if (!open) {
-    return (
+  return (
+    <>
       <button
         type="button"
         onClick={() => setOpen(true)}
         aria-label="채팅 열기"
-        className="fixed bottom-6 right-6 flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg transition hover:bg-blue-700"
+        aria-hidden={open}
+        tabIndex={open ? -1 : 0}
+        className={`fixed bottom-6 right-6 flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg transition-all duration-300 ease-out hover:bg-blue-700 ${
+          open
+            ? 'pointer-events-none translate-y-1 scale-90 opacity-0'
+            : 'opacity-100'
+        }`}
       >
         <span aria-hidden className="text-2xl leading-none">💬</span>
       </button>
-    );
-  }
 
-  return (
-    <div className="fixed bottom-6 right-6 flex h-[500px] w-[350px] flex-col rounded-xl border border-gray-200 bg-white shadow-2xl">
+      <div
+        aria-hidden={!open}
+        className={`fixed bottom-6 right-6 flex h-[500px] w-[350px] flex-col rounded-xl border border-gray-200 bg-white shadow-2xl transition-all duration-300 ease-out ${
+          open
+            ? 'translate-y-0 scale-100 opacity-100'
+            : 'pointer-events-none translate-y-2 scale-[0.98] opacity-0'
+        }`}
+      >
       <header className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
         <div>
           <div className="text-sm font-semibold text-gray-900">호스트</div>
           <div className="flex items-center gap-1.5 text-xs text-gray-500">
-            <span
-              aria-hidden
-              className={`inline-block h-1.5 w-1.5 rounded-full ${
-                manager?.online_status === 'online'
-                  ? 'bg-green-500'
-                  : 'bg-gray-300'
-              }`}
-            />
+            {manager?.online_status === 'online' ? (
+              <span aria-hidden className="relative inline-flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-70" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-green-500" />
+              </span>
+            ) : (
+              <span
+                aria-hidden
+                className="inline-block h-1.5 w-1.5 rounded-full bg-gray-300"
+              />
+            )}
             {manager?.online_status === 'online'
               ? '운영자 응대 가능'
               : `운영자 부재중${manager?.last_seen_at ? ` · ${relativeTime(manager.last_seen_at)}` : ''}`}
@@ -401,6 +414,7 @@ export function Widget() {
           </button>
         </div>
       </form>
-    </div>
+      </div>
+    </>
   );
 }
