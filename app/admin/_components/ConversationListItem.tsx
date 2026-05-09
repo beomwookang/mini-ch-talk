@@ -32,6 +32,7 @@ export function ConversationListItem({
 }: Props) {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [lastMessage, setLastMessage] = useState<Message | null>(null);
+  const [unreadCount, setUnreadCount] = useState(0);
   const supabaseRef = useRef(createSupabaseBrowserClient());
 
   useEffect(() => {
@@ -39,7 +40,7 @@ export function ConversationListItem({
     let cancelled = false;
 
     (async () => {
-      const [custRes, msgRes] = await Promise.all([
+      const [custRes, msgRes, unreadRes] = await Promise.all([
         sb
           .from('customers')
           .select('*')
@@ -52,12 +53,20 @@ export function ConversationListItem({
           .order('sequence', { ascending: false })
           .limit(1)
           .maybeSingle(),
+        sb
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('conversation_id', conversation.id)
+          .eq('sender_type', 'customer')
+          .is('read_at', null),
       ]);
       if (cancelled) return;
       if (custRes.error) console.error('list customer fetch', custRes.error);
       else if (custRes.data) setCustomer(custRes.data as Customer);
       if (msgRes.error) console.error('list message fetch', msgRes.error);
       else setLastMessage((msgRes.data as Message) ?? null);
+      if (unreadRes.error) console.error('list unread count', unreadRes.error);
+      else setUnreadCount(unreadRes.count ?? 0);
     })();
 
     const customerChannel = sb
@@ -84,7 +93,34 @@ export function ConversationListItem({
           table: 'messages',
           filter: `conversation_id=eq.${conversation.id}`,
         },
-        (payload) => setLastMessage(payload.new as Message),
+        (payload) => {
+          const m = payload.new as Message;
+          setLastMessage(m);
+          if (m.sender_type === 'customer' && !m.read_at) {
+            setUnreadCount((c) => c + 1);
+          }
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversation.id}`,
+        },
+        (payload) => {
+          const before = payload.old as Partial<Message>;
+          const after = payload.new as Message;
+          // Customer message just got read → decrement unread.
+          if (
+            after.sender_type === 'customer' &&
+            !before.read_at &&
+            after.read_at
+          ) {
+            setUnreadCount((c) => Math.max(0, c - 1));
+          }
+        },
       )
       .subscribe();
 
@@ -107,9 +143,16 @@ export function ConversationListItem({
         <span className="truncate text-sm font-medium">
           {customerLabel(customer, conversation.id)}
         </span>
-        <span className="shrink-0 text-[10px] text-gray-400">
-          {messageTime(lastMessage?.created_at ?? conversation.opened_at)}
-        </span>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {unreadCount > 0 && (
+            <span className="inline-flex min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
+          <span className="text-[10px] text-gray-400">
+            {messageTime(lastMessage?.created_at ?? conversation.opened_at)}
+          </span>
+        </div>
       </div>
       <div className="mt-0.5 truncate text-xs text-gray-500">
         {lastMessage
