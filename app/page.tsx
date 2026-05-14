@@ -73,7 +73,12 @@ function DocumentLinks() {
       label: 'KPI 시트',
       href: `${REPORT_BASE}/KPI_SHEET.md`,
       external: true,
-    }
+    },
+    {
+      label: '아키텍처 메모',
+      href: `${REPORT_BASE}/ARCHITECTURE.md`,
+      external: true,
+    },
   ];
   return (
     <section className="mb-[100px] sm:mb-[120px]">
